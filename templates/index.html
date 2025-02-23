@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Video Recording and Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html, body {
+            overscroll-behavior-y: contain;
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            padding-bottom: 56.25%;
+            height: 0;
+            overflow: hidden;
+        }
+        
+        .video-container video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .content-wrapper {
+            min-height: 100%;
+            padding: 1rem;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .content-wrapper::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="content-wrapper">
+        <div class="max-w-6xl mx-auto">
+            <h1 class="text-2xl font-bold mb-4 text-center">Household Issues Analysis</h1>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-white p-4 rounded-lg shadow-lg">
+                    <h2 class="text-lg font-semibold mb-2">Video Recording</h2>
+                    
+                    <select id="cameraSelect" class="w-full mb-2 p-2 border rounded">
+                        <option value="">Loading cameras...</option>
+                    </select>
+                    
+                    <div class="video-container mb-4">
+                        <video id="preview" class="bg-black rounded-lg" autoplay muted playsinline></video>
+                    </div>
+                    
+                    <div class="flex gap-2 justify-center mb-4">
+                        <button id="startButton" class="bg-blue-500 text-white px-4 py-3 rounded hover:bg-blue-600 flex-1 text-lg">
+                            Start Recording
+                        </button>
+                        <button id="stopButton" class="bg-red-500 text-white px-4 py-3 rounded hover:bg-red-600 flex-1 text-lg" disabled>
+                            Stop Recording
+                        </button>
+                    </div>
+                    
+                    <div class="video-container mb-4">
+                        <video id="recordedVideo" class="bg-black rounded-lg hidden" controls playsinline></video>
+                    </div>
+                    
+                    <button id="processButton" class="w-full bg-green-500 text-white px-4 py-3 rounded hover:bg-green-600 text-lg hidden">
+                        Process Video
+                    </button>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg shadow-lg">
+                    <h2 class="text-lg font-semibold mb-2">Analysis Results</h2>
+                    <div id="analysisResults" class="prose">
+                        <p class="text-gray-500 italic">Analysis results will appear here after processing...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let recordedChunks = [];
+        let currentStream;
+
+        // Initialize everything when the page loads
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // First request camera permission
+                const initialStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' }, // Default to back camera
+                    audio: true 
+                });
+                
+                // Once we have permission, get the list of cameras
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                // Populate camera select
+                const cameraSelect = document.getElementById('cameraSelect');
+                cameraSelect.innerHTML = videoDevices.map(device => 
+                    `<option value="${device.deviceId}">${device.label || `Camera ${videoDevices.indexOf(device) + 1}`}</option>`
+                ).join('');
+                
+                // Try to select back camera by default
+                const backCamera = videoDevices.find(device => 
+                    device.label.toLowerCase().includes('back') || 
+                    device.label.toLowerCase().includes('rear')
+                );
+                
+                if (backCamera) {
+                    cameraSelect.value = backCamera.deviceId;
+                    await setupCamera(backCamera.deviceId);
+                } else {
+                    await setupCamera(videoDevices[0].deviceId);
+                }
+                
+                // Stop the initial stream
+                initialStream.getTracks().forEach(track => track.stop());
+                
+            } catch (err) {
+                console.error('Error during initialization:', err);
+                alert('Error accessing camera. Please ensure you have granted camera permissions and try refreshing the page.');
+            }
+        });
+
+        async function setupCamera(deviceId) {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            const constraints = {
+                video: {
+                    deviceId: deviceId ? {exact: deviceId} : undefined,
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: true
+            };
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                const preview = document.getElementById('preview');
+                preview.srcObject = currentStream;
+                setupRecorder(currentStream);
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                alert('Error accessing the selected camera. Please try another camera or refresh the page.');
+            }
+        }
+
+        function setupRecorder(stream) {
+            try {
+                const options = {mimeType: 'video/webm;codecs=vp8,opus'};
+                mediaRecorder = new MediaRecorder(stream, options);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    const videoURL = URL.createObjectURL(blob);
+                    const recordedVideo = document.getElementById('recordedVideo');
+                    recordedVideo.src = videoURL;
+                    recordedVideo.classList.remove('hidden');
+                    document.getElementById('processButton').classList.remove('hidden');
+                };
+            } catch (err) {
+                console.error('Error setting up recorder:', err);
+                alert('Error setting up video recorder. Please try a different browser.');
+            }
+        }
+
+        // Camera selection change handler
+        document.getElementById('cameraSelect').addEventListener('change', (e) => {
+            setupCamera(e.target.value);
+        });
+
+        // Start recording
+        document.getElementById('startButton').addEventListener('click', () => {
+            recordedChunks = [];
+            mediaRecorder.start();
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+        });
+
+        // Stop recording
+        document.getElementById('stopButton').addEventListener('click', () => {
+            mediaRecorder.stop();
+            document.getElementById('startButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+        });
+
+        // Process video
+        document.getElementById('processButton').addEventListener('click', async () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const formData = new FormData();
+            formData.append('video', blob);
+
+            const processButton = document.getElementById('processButton');
+            const analysisResults = document.getElementById('analysisResults');
+            
+            processButton.disabled = true;
+            processButton.textContent = 'Processing...';
+            analysisResults.innerHTML = '<p class="text-gray-500">Processing video...</p>';
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    analysisResults.innerHTML = `
+                        <div class="whitespace-pre-wrap">${result.analysis}</div>
+                    `;
+                } else {
+                    throw new Error(result.error);
+                }
+            } catch (error) {
+                analysisResults.innerHTML = `
+                    <p class="text-red-500">Error processing video: ${error.message}</p>
+                `;
+            } finally {
+                processButton.disabled = false;
+                processButton.textContent = 'Process Video';
+            }
+        });
+    </script>
+</body>
+</html>
