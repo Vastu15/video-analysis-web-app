@@ -10,7 +10,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Initialize Google API client
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_API_KEY = "AIzaSyBx7Cwy4Od6CvWEtTAHhSWatEFKenoA06k"
 client = genai.Client(api_key=GOOGLE_API_KEY)
 model_name = "gemini-2.0-flash-exp"
 
