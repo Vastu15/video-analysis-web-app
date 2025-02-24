@@ -41,12 +41,53 @@
         .content-wrapper::-webkit-scrollbar {
             display: none;
         }
+        
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #09f;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .camera-status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        
+        .status-error {
+            background-color: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .status-success {
+            background-color: #d1fae5;
+            color: #059669;
+        }
+        
+        .status-warning {
+            background-color: #fef3c7;
+            color: #d97706;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
     <div class="content-wrapper">
         <div class="max-w-6xl mx-auto">
             <h1 class="text-2xl font-bold mb-4 text-center">Household Issues Analysis</h1>
+            
+            <div id="cameraStatus" class="camera-status status-warning mb-4">
+                Waiting for camera permission...
+            </div>
             
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="bg-white p-4 rounded-lg shadow-lg">
@@ -58,10 +99,13 @@
                     
                     <div class="video-container mb-4">
                         <video id="preview" class="bg-black rounded-lg" autoplay muted playsinline></video>
+                        <div id="cameraLoader" class="absolute inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50">
+                            <div class="loading-spinner"></div>
+                        </div>
                     </div>
                     
                     <div class="flex gap-2 justify-center mb-4">
-                        <button id="startButton" class="bg-blue-500 text-white px-4 py-3 rounded hover:bg-blue-600 flex-1 text-lg">
+                        <button id="startButton" class="bg-blue-500 text-white px-4 py-3 rounded hover:bg-blue-600 flex-1 text-lg" disabled>
                             Start Recording
                         </button>
                         <button id="stopButton" class="bg-red-500 text-white px-4 py-3 rounded hover:bg-red-600 flex-1 text-lg" disabled>
@@ -75,6 +119,10 @@
                     
                     <button id="processButton" class="w-full bg-green-500 text-white px-4 py-3 rounded hover:bg-green-600 text-lg hidden">
                         Process Video
+                    </button>
+                    
+                    <button id="requestPermissionButton" class="w-full mt-4 bg-blue-700 text-white px-4 py-3 rounded hover:bg-blue-800 text-lg">
+                        Request Camera Permission
                     </button>
                 </div>
 
@@ -92,22 +140,49 @@
         let mediaRecorder;
         let recordedChunks = [];
         let currentStream;
+        
+        const cameraStatus = document.getElementById('cameraStatus');
+        const cameraLoader = document.getElementById('cameraLoader');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const requestPermissionButton = document.getElementById('requestPermissionButton');
+        const cameraSelect = document.getElementById('cameraSelect');
 
-        // Initialize everything when the page loads
-        document.addEventListener('DOMContentLoaded', async () => {
+        // Initialize camera permission request
+        requestPermissionButton.addEventListener('click', async () => {
             try {
+                cameraStatus.className = 'camera-status status-warning';
+                cameraStatus.textContent = 'Requesting camera permission...';
+                await initializeCamera();
+            } catch (err) {
+                console.error('Error requesting permission:', err);
+            }
+        });
+
+        async function initializeCamera() {
+            try {
+                cameraLoader.style.display = 'flex';
+                
                 // First request camera permission
                 const initialStream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment' }, // Default to back camera
                     audio: true 
                 });
                 
+                // Update status
+                cameraStatus.className = 'camera-status status-success';
+                cameraStatus.textContent = 'Camera access granted!';
+                requestPermissionButton.style.display = 'none';
+                
                 // Once we have permission, get the list of cameras
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const videoDevices = devices.filter(device => device.kind === 'videoinput');
                 
+                if (videoDevices.length === 0) {
+                    throw new Error('No cameras found on this device');
+                }
+                
                 // Populate camera select
-                const cameraSelect = document.getElementById('cameraSelect');
                 cameraSelect.innerHTML = videoDevices.map(device => 
                     `<option value="${device.deviceId}">${device.label || `Camera ${videoDevices.indexOf(device) + 1}`}</option>`
                 ).join('');
@@ -125,14 +200,19 @@
                     await setupCamera(videoDevices[0].deviceId);
                 }
                 
+                // Enable the start button
+                startButton.disabled = false;
+                
                 // Stop the initial stream
                 initialStream.getTracks().forEach(track => track.stop());
                 
             } catch (err) {
                 console.error('Error during initialization:', err);
-                alert('Error accessing camera. Please ensure you have granted camera permissions and try refreshing the page.');
+                cameraStatus.className = 'camera-status status-error';
+                cameraStatus.textContent = `Camera error: ${err.message}. Please try another browser or device.`;
+                cameraLoader.style.display = 'none';
             }
-        });
+        }
 
         async function setupCamera(deviceId) {
             if (currentStream) {
@@ -153,15 +233,29 @@
                 const preview = document.getElementById('preview');
                 preview.srcObject = currentStream;
                 setupRecorder(currentStream);
+                cameraLoader.style.display = 'none';
             } catch (err) {
                 console.error('Error accessing camera:', err);
-                alert('Error accessing the selected camera. Please try another camera or refresh the page.');
+                cameraStatus.className = 'camera-status status-error';
+                cameraStatus.textContent = `Error accessing camera: ${err.message}`;
+                cameraLoader.style.display = 'none';
             }
         }
 
         function setupRecorder(stream) {
             try {
-                const options = {mimeType: 'video/webm;codecs=vp8,opus'};
+                // Try different MIME types for better compatibility
+                let options;
+                if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+                    options = {mimeType: 'video/webm;codecs=vp9,opus'};
+                } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+                    options = {mimeType: 'video/webm;codecs=vp8,opus'};
+                } else if (MediaRecorder.isTypeSupported('video/webm')) {
+                    options = {mimeType: 'video/webm'};
+                } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+                    options = {mimeType: 'video/mp4'};
+                }
+                
                 mediaRecorder = new MediaRecorder(stream, options);
                 
                 mediaRecorder.ondataavailable = (event) => {
@@ -171,7 +265,7 @@
                 };
 
                 mediaRecorder.onstop = () => {
-                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    const blob = new Blob(recordedChunks, { type: options ? options.mimeType : 'video/webm' });
                     const videoURL = URL.createObjectURL(blob);
                     const recordedVideo = document.getElementById('recordedVideo');
                     recordedVideo.src = videoURL;
@@ -180,28 +274,34 @@
                 };
             } catch (err) {
                 console.error('Error setting up recorder:', err);
-                alert('Error setting up video recorder. Please try a different browser.');
+                cameraStatus.className = 'camera-status status-error';
+                cameraStatus.textContent = `Error setting up video recorder: ${err.message}`;
             }
         }
 
         // Camera selection change handler
-        document.getElementById('cameraSelect').addEventListener('change', (e) => {
+        cameraSelect.addEventListener('change', (e) => {
+            cameraLoader.style.display = 'flex';
             setupCamera(e.target.value);
         });
 
         // Start recording
-        document.getElementById('startButton').addEventListener('click', () => {
+        startButton.addEventListener('click', () => {
             recordedChunks = [];
             mediaRecorder.start();
-            document.getElementById('startButton').disabled = true;
-            document.getElementById('stopButton').disabled = false;
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            cameraStatus.className = 'camera-status status-success';
+            cameraStatus.textContent = 'Recording in progress...';
         });
 
         // Stop recording
-        document.getElementById('stopButton').addEventListener('click', () => {
+        stopButton.addEventListener('click', () => {
             mediaRecorder.stop();
-            document.getElementById('startButton').disabled = false;
-            document.getElementById('stopButton').disabled = true;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            cameraStatus.className = 'camera-status status-success';
+            cameraStatus.textContent = 'Recording complete. You can now process the video.';
         });
 
         // Process video
@@ -216,6 +316,8 @@
             processButton.disabled = true;
             processButton.textContent = 'Processing...';
             analysisResults.innerHTML = '<p class="text-gray-500">Processing video...</p>';
+            cameraStatus.className = 'camera-status status-warning';
+            cameraStatus.textContent = 'Analyzing video. This may take a minute...';
 
             try {
                 const response = await fetch('/upload', {
@@ -229,6 +331,8 @@
                     analysisResults.innerHTML = `
                         <div class="whitespace-pre-wrap">${result.analysis}</div>
                     `;
+                    cameraStatus.className = 'camera-status status-success';
+                    cameraStatus.textContent = 'Analysis complete!';
                 } else {
                     throw new Error(result.error);
                 }
@@ -236,11 +340,19 @@
                 analysisResults.innerHTML = `
                     <p class="text-red-500">Error processing video: ${error.message}</p>
                 `;
+                cameraStatus.className = 'camera-status status-error';
+                cameraStatus.textContent = `Error: ${error.message}`;
             } finally {
                 processButton.disabled = false;
                 processButton.textContent = 'Process Video';
             }
         });
+        
+        // Check if the protocol is HTTPS
+        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+            cameraStatus.className = 'camera-status status-error';
+            cameraStatus.textContent = 'Camera access requires HTTPS. Please use a secure connection.';
+        }
     </script>
 </body>
 </html>

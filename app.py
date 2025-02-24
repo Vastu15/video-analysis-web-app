@@ -1,7 +1,6 @@
 from google import genai
 from google.genai import types
 import os
-import os
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
 
@@ -9,27 +8,13 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Use environment variable for port
-port = int(os.environ.get("PORT", 5000))
-
 # Initialize Google API client
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 client = genai.Client(api_key=GOOGLE_API_KEY)
 model_name = "gemini-2.0-flash-exp"
 
 
-def upload_to_google_ai(video_path):
-    video_file = client.files.upload(path=video_path)
-    while video_file.state == "PROCESSING":
-        time.sleep(10)
-        video_file = client.files.get(name=video_file.name)
-    if video_file.state == "FAILED":
-        raise ValueError(video_file.state)
-    return video_file
-
-
-def process_video(video_file):
-    USER_PROMPT = """Analyze the video and identify any household issues such as broken/leaking faucets, cracked doors, damp walls etc. Generate a structured technical report using the following format:
+USER_PROMPT = """Analyze the video and identify any household issues such as broken/leaking faucets, cracked doors, damp walls etc. Generate a structured technical report using the following format:
 
 ISSUE TYPE:
 [Single line description of the primary issue]
@@ -60,21 +45,8 @@ DOCUMENTATION NOTES:
 - [Areas needing further inspection]
 """
 
-    response = client.models.generate_content(
-        model=model_name,
-        contents=[
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_uri(
-                        file_uri=video_file.uri, mime_type=video_file.mime_type
-                    )
-                ],
-            ),
-            USER_PROMPT,
-        ],
-        config=types.GenerateContentConfig(
-            system_instruction="""You are a professional property inspection assistant specializing in technical documentation. Your role is to analyze video content showing household issues and produce structured technical reports. Follow these key principles:
+system_instruction = (
+    """You are a professional property inspection assistant specializing in technical documentation. Your role is to analyze video content showing household issues and produce structured technical reports. Follow these key principles:
 
 1. DOCUMENTATION STYLE:
 - Maintain strictly professional and technical language
@@ -116,10 +88,7 @@ DOCUMENTATION NOTES:
 - Security vulnerabilities
 
 FORMAT ALL OBSERVATIONS USING THE PRESCRIBED TEMPLATE STRUCTURE IN THE USER PROMPT.""",
-            temperature=0.0,
-        ),
-    )
-    return response.text
+)
 
 
 @app.route("/")
@@ -143,15 +112,35 @@ def upload_video():
 
     try:
         # Upload to Google AI
-        google_video = upload_to_google_ai(video_path)
+        video_file = client.files.upload(path=video_path)
 
         # Process the video
-        analysis_result = process_video(google_video)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_uri(
+                            file_uri=video_file.uri, mime_type=video_file.mime_type
+                        )
+                    ],
+                ),
+                USER_PROMPT,
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.0,
+            ),
+        )
 
-        return jsonify({"success": True, "analysis": analysis_result})
+        return jsonify({"success": True, "analysis": response.text})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    # Enable HTTPS support for development environment
+    # For production, Render handles HTTPS
     app.run(host="0.0.0.0", port=port)
