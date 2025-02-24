@@ -97,7 +97,7 @@ def index():
     return render_template("index.html")
 
 
-def upload_video(video_file_name):
+def upload_video_gcp(video_file_name):
     video_file = client.files.upload(path=video_file_name)
 
     while video_file.state == "PROCESSING":
