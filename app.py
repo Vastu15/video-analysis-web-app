@@ -1,4 +1,5 @@
 from google import genai
+import time
 from google.genai import types
 import os
 from flask import Flask, request, jsonify, render_template
@@ -96,6 +97,21 @@ def index():
     return render_template("index.html")
 
 
+def upload_video(video_file_name):
+    video_file = client.files.upload(path=video_file_name)
+
+    while video_file.state == "PROCESSING":
+        print("Waiting for video to be processed.")
+        time.sleep(10)
+        video_file = client.files.get(name=video_file.name)
+
+    if video_file.state == "FAILED":
+        raise ValueError(video_file.state)
+    print(f"Video processing complete: " + video_file.uri)
+
+    return video_file
+
+
 @app.route("/upload", methods=["POST"])
 def upload_video():
     if "video" not in request.files:
@@ -112,7 +128,7 @@ def upload_video():
 
     try:
         # Upload to Google AI
-        video_file = client.files.upload(path=video_path)
+        video_file = upload_video(path=video_path)
 
         # Process the video
         response = client.models.generate_content(
