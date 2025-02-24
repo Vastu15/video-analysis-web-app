@@ -128,7 +128,7 @@ def upload_video():
 
     try:
         # Upload to Google AI
-        video_file = upload_video(video_path)
+        video_file = upload_video_gcp(video_path)
 
         # Process the video
         response = client.models.generate_content(
