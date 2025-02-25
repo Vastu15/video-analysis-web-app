@@ -1,6 +1,6 @@
 from google import genai
-import time
 from google.genai import types
+import time
 import os
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
@@ -10,7 +10,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Initialize Google API client
-GOOGLE_API_KEY = "AIzaSyBx7Cwy4Od6CvWEtTAHhSWatEFKenoA06k"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 client = genai.Client(api_key=GOOGLE_API_KEY)
 model_name = "gemini-2.0-flash-exp"
 
@@ -98,11 +98,11 @@ def index():
 
 
 def upload_video_gcp(video_file_name):
-    video_file = client.files.upload(path=video_file_name)
+    video_file = client.files.upload(file=video_file_name)
 
     while video_file.state == "PROCESSING":
         print("Waiting for video to be processed.")
-        time.sleep(10)
+        time.sleep(5)
         video_file = client.files.get(name=video_file.name)
 
     if video_file.state == "FAILED":
